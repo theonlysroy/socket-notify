@@ -8,7 +8,7 @@ const userSockets = new Map<string, Socket>();
 
 export function initSocket(io: Server) {
   io.on("connection", async (socket) => {
-    const token = socket.handshake.headers.token;
+    const token = socket.handshake.auth.token;
     if (!token) {
       console.log(`[ERROR]\tAuth token missing in socket header`);
       socket.disconnect(true);

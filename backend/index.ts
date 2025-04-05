@@ -11,6 +11,7 @@ import {
 } from "socket.io";
 import dbHandling, { db, type UserRow } from "./db";
 import { initSocket } from "./socket";
+import { timeStamp } from "node:console";
 dotenv.config({ path: ".env" });
 
 interface SocketApp extends Application {
@@ -26,7 +27,7 @@ const domain = process.env.DOMAIN as string;
 const httpServer = createServer(app);
 const io: Server = new SocketServer(httpServer, {
   cors: {
-    origin: "*",
+    origin: process.env.FRONTEND_URL as string,
   },
 });
 
@@ -107,10 +108,15 @@ app.post("/create-user", async (req, res, next) => {
       `SELECT * FROM users WHERE id=?`,
       userResult.lastID,
     );
-    const notifyMsg = `A new user: ${user?.name} registered.`;
+    const notifyObj = {
+      id: user?.id,
+      message: `A new user: ${user?.name} registered.`,
+      timeStamp: new Date().toISOString(),
+    };
+    const notifyMsg = JSON.stringify(notifyObj);
     const notificationResult = await db.run(
       "INSERT INTO notifications (message, userId) VALUES (?, ?)",
-      [notifyMsg, user?.id],
+      [notifyObj.message, user?.id],
     );
     io.to("admins").emit("admin:notifications", notifyMsg);
     res.status(201).json({
@@ -125,9 +131,10 @@ app.post("/create-user", async (req, res, next) => {
 app.post("/login", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, role } = req.body;
-    const result = await db.get("SELECT id, role FROM users WHERE email = ?", [
-      email,
-    ]);
+    const result = await db.get(
+      "SELECT id, role, name FROM users WHERE email = ?",
+      [email],
+    );
     if (!result || result.role !== role)
       throw new Error("No user found with this email");
 
@@ -138,6 +145,7 @@ app.post("/login", async (req: Request, res: Response, next: NextFunction) => {
       success: true,
       message: "Login Successful",
       data: {
+        name: result.name,
         token,
       },
     });
@@ -149,7 +157,9 @@ app.post("/login", async (req: Request, res: Response, next: NextFunction) => {
 app.get("/admin-notifications", auth, adminAuth, async (req, res, next) => {
   try {
     const notifications: any[] = [];
-    const data = await db.all("SELECT id, message FROM notifications;");
+    const data = await db.all(
+      "SELECT id, message, timestamp FROM notifications;",
+    );
     res.status(200).json({
       success: true,
       message: "Successful",
@@ -159,6 +169,44 @@ app.get("/admin-notifications", auth, adminAuth, async (req, res, next) => {
     next(error);
   }
 });
+
+// app.get("/user-notifications", auth, userAuth, async (req:Request, res:Response, next:NextFunction) => {
+//   try {
+//     const notifications: any[] = [];
+//     const data = await db.all(
+//       "SELECT id, message, timestamp FROM notifications;",
+//     );
+//     res.status(200).json({
+//       success: true,
+//       message: "Successful",
+//       data,
+//     });
+//   } catch (error: any) {
+//     next(error);
+//   }
+// });
+
+app.get(
+  "/user-profile",
+  auth,
+  userAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = Number(req.user);
+      const result = await db.get<UserRow>("SELECT * from users WHERE id = ?", [
+        userId,
+      ]);
+      if (!result) throw new Error("Failed to fetch the user profile");
+      res.status(200).json({
+        success: true,
+        message: "Successful",
+        data: result,
+      });
+    } catch (error: any) {
+      next(error);
+    }
+  },
+);
 
 app.get(
   "/verify-user",
